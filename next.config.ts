@@ -6,7 +6,10 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   serverExternalPackages: ["playwright-core"],
   // playwright-core reads JSON files at runtime that file tracing does not see.
-  outputFileTracingIncludes: { "/api/pdf": ["./node_modules/playwright-core/**/*"] },
+  outputFileTracingIncludes: {
+    "/api/pdf": ["./node_modules/playwright-core/**/*"],
+    "/api/import": ["./node_modules/playwright-core/**/*"],
+  },
   turbopack: {
     rules: {
       "*.css": {

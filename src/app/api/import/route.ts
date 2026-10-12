@@ -33,10 +33,11 @@ const Body = z.discriminatedUnion("kind", [
 
 export type ImportResponse =
   | { ok: true; recipe: Recipe; provider: ProviderName; warning: string | null }
-  | { ok: false; error: string; code: string };
+  /** `text`: what a link held when it was not a recipe, so the user can complete it by hand. */
+  | { ok: false; error: string; code: string; text?: string };
 
-function fail(status: number, code: string, error: string, headers?: HeadersInit) {
-  return Response.json({ ok: false, code, error } satisfies ImportResponse, { status, headers });
+function fail(status: number, code: string, error: string, headers?: HeadersInit, text?: string) {
+  return Response.json({ ok: false, code, error, text } satisfies ImportResponse, { status, headers });
 }
 
 async function fromText(
@@ -103,15 +104,18 @@ export async function POST(request: Request) {
   }
 
   const started = Date.now();
+  let linkText: string | undefined;
   try {
     let result: { recipe: Recipe; provider: ProviderName; warning: string | null };
     if (body.kind === "text") {
       result = await fromText(body.text, { kind: "text" });
     } else if (body.kind === "link" && isSocialUrl(body.url)) {
       const post = await fetchSocialPost(body.url);
+      linkText = post.caption;
       result = await fromText(post.caption, { kind: post.platform, url: post.url, author: post.author });
     } else if (body.kind === "link") {
       const page = await fetchRecipePage(body.url);
+      linkText = page.text;
       result = await fromText(page.text, { kind: "web", url: page.url, author: page.structured?.author ?? page.host });
       if (page.structured) result = { ...result, recipe: withPageFacts(result.recipe, page.structured) };
     } else {
@@ -128,7 +132,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, ...result } satisfies ImportResponse);
   } catch (err) {
     console.info(JSON.stringify({ event: "import", kind: body.kind, ms: Date.now() - started, ok: false, error: (err as Error).name }));
-    if (err instanceof NotARecipeError) return fail(422, "not_a_recipe", err.message);
+    if (err instanceof NotARecipeError) return fail(422, "not_a_recipe", err.message, undefined, linkText);
     if (err instanceof SocialFetchError || err instanceof WebFetchError) {
       return fail(err.code === "unsupported_url" ? 400 : err.code === "no_recipe" ? 422 : 502, `link_${err.code}`, err.message);
     }

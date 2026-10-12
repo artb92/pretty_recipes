@@ -77,6 +77,13 @@ export function ImportPanel({ studio }: { studio: Studio }) {
       });
       const data = (await res.json()) as ImportResponse;
       if (!data.ok) {
+        if (data.code === "not_a_recipe" && data.text) {
+          // Show what the link held so the user can add the recipe from the video by hand.
+          setMode("text");
+          setText(data.text);
+          setError(t.errorLinkNoRecipe);
+          return;
+        }
         setError(data.code === "not_a_recipe" ? t.errorNotRecipe : data.error || t.errorGeneric);
         return;
       }

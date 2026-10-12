@@ -22,6 +22,7 @@ export type WebPage = {
 };
 
 const MAX_TEXT = 20_000;
+const BOT_WALL = new Set([401, 403, 429, 503]);
 
 export async function fetchRecipePage(input: string): Promise<WebPage> {
   let url: URL;
@@ -41,7 +42,20 @@ export async function fetchRecipePage(input: string): Promise<WebPage> {
     throw new WebFetchError(`Could not reach ${url.hostname}. Paste the recipe as text instead.`, "blocked");
   }
   if (res.status === 404 || res.status === 410) throw new WebFetchError("This page does not exist.", "not_found");
-  if (res.status !== 200) {
+  // Sites behind bot checks (Cloudflare and the like) refuse plain server requests; a real browser usually passes.
+  if (BOT_WALL.has(res.status)) {
+    const { browserPage } = await import("./browser");
+    res = await browserPage(res.url).catch((err) => {
+      console.warn(`[import] browser fallback failed for ${res.url.hostname}: ${(err as Error).message}`);
+      return res;
+    });
+    if (!recipeFromJsonLd(res.body) && BOT_WALL.has(res.status)) {
+      throw new WebFetchError(
+        `${res.url.hostname} blocks automated visits (${res.status}). Paste the recipe as text instead.`,
+        "blocked",
+      );
+    }
+  } else if (res.status !== 200) {
     throw new WebFetchError(
       `${res.url.hostname} refused the request (${res.status}). Paste the recipe as text instead.`,
       "blocked",

@@ -4,12 +4,18 @@ import { chromium, type Browser } from "playwright-core";
 let browser: Promise<Browser> | null = null;
 
 /** One shared headless Chromium per server process; relaunched if it crashes. */
-function getBrowser(): Promise<Browser> {
+export function getBrowser(): Promise<Browser> {
   if (!browser) {
     browser = chromium
       .launch({
         executablePath: process.env.CHROMIUM_PATH || undefined,
-        args: ["--no-sandbox", "--disable-dev-shm-usage", "--font-render-hinting=none"],
+        args: [
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--font-render-hinting=none",
+          // Website imports load recipe pages here too; bot checks reject navigator.webdriver.
+          "--disable-blink-features=AutomationControlled",
+        ],
       })
       .then((b) => {
         b.on("disconnected", () => {
