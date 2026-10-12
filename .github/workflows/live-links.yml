@@ -1,0 +1,31 @@
+name: Live links
+
+# Imports every link in tests/test_links.md against the real sites. Informational: sites change
+# and block bots, so this never gates a merge.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tests/test_links.md
+      - tests/live-links.test.ts
+      - src/lib/web/**
+      - src/lib/social/**
+      - src/lib/net.ts
+      - src/lib/recipe/heuristic.ts
+      - .github/workflows/live-links.yml
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - run: pnpm exec vitest run tests/live-links.test.ts --reporter=verbose
+        env:
+          LIVE_LINKS: "1"
