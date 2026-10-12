@@ -9,7 +9,7 @@ import { fold, parseIngredientLine } from "./units";
  */
 
 const H_INGREDIENTS = /^(?:ingr[eé]dients?|what you(?:'|’)?ll need|you(?:'|’)?ll need|liste de courses|il vous faut)\b/i;
-const H_STEPS = /^(?:pr[eé]paration|instructions?|directions?|m[eé]thode|method|steps?|[eé]tapes?|d[eé]roul[eé]|recette|how to make(?: it)?|to make)\b/i;
+const H_STEPS = /^(?:pr[eé]paration|instructions?|directions?|m[eé]thode|method|steps?|[eé]tapes?|d[eé]roul[eé]|recette(?=\s*$)|how to make(?: it)?|to make)\b/i;
 const H_NOTES = /^(?:notes?|tips?|astuces?|conseils?|storage|conservation)\b/i;
 
 const QUANTITY_START = /^\s*(?:\d|[½¼¾⅓⅔⅛]|(?:une?|a|an)\s+(?:pinc[eé]e|pinch|filet|trait|dash|gousse|clove|bo[iî]te|can|sachet|packet|botte|bunch)\b)/i;
@@ -41,6 +41,7 @@ function cleanTitle(line: string): string {
   return line
     .replace(/\s*(?:[-–|:]\s*)?\b(?:save (?:this|it)|follow (?:me|for)|like (?:and|&) |recette en commentaire|recipe (?:below|in (?:the )?(?:comments|caption))|enregistre)\b.*$/i, "")
     .replace(/#\S+/g, "")
+    .replace(/^(?:recipe|recette)\b\s*[:\-–]?\s*(?=\S)/i, "")
     .replace(/[!.\s]+$/, "")
     .trim();
 }
@@ -75,10 +76,44 @@ function keywords(name: string): string[] {
   return Array.from(new Set([...(first ? [first] : []), ...all.reverse()]));
 }
 
+const PROSE = /[.!?]/;
+const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+const isProse = (s: string) => words(s) >= 10 && PROSE.test(s) && !QUANTITY_START.test(s);
+
+/**
+ * Captions often glue the method onto the last ingredient ("- 1 sachet de levure Il faut
+ * préchauffer…") and the next heading onto a line ("- 40 g de beurre Crème chantilly :").
+ * Split those back into separate lines.
+ */
+function explode(line: string): string[] {
+  const ingredientLike = /^\s*[-*•·]/.test(line) || QUANTITY_START.test(line);
+  const out: string[] = [];
+  let rest = line;
+  if (ingredientLike) {
+    const m = rest.match(/\s(?=[A-ZÀ-Ý][\p{Ll}’']+\s)/u);
+    if (m?.index !== undefined && isProse(rest.slice(m.index + 1))) {
+      out.push(rest.slice(0, m.index));
+      rest = rest.slice(m.index + 1);
+    }
+  }
+  // A short heading at the end of the line: "… les bords. Crème pâtissière :"
+  const tail = rest.match(/^(.*?(?:[.!?)]|\S))\s+((?:[A-ZÀ-Ý][\p{L}’'-]*)(?:\s+[\p{L}’'()+-]+){0,7})\s*[:：]$/u);
+  if (tail && (isProse(tail[1]) || ingredientLike || out.length) && words(tail[2]) <= 8) {
+    out.push(tail[1], `${tail[2]} :`);
+  } else {
+    out.push(rest);
+  }
+  return out;
+}
+
 export function heuristicDraft(input: string): DraftRecipe {
   const text = input.replace(/\r\n?/g, "\n");
   const language = detectLanguage(text);
-  const rawLines = text.split("\n").map((l) => l.trim()).filter((l) => l && !isHashtagLine(l));
+  const rawLines = text
+    .split("\n")
+    .flatMap((l) => explode(l.trim()))
+    .map((l) => l.trim())
+    .filter((l) => l && !isHashtagLine(l));
 
   type Section = "intro" | "ingredients" | "steps" | "notes";
   let section: Section = "intro";
@@ -105,7 +140,15 @@ export function heuristicDraft(input: string): DraftRecipe {
     });
   };
 
-  for (const original of rawLines) {
+  const isGroupHeading = (l: string) => /[:：]$/.test(l) && !QUANTITY_START.test(l) && l.length < 50;
+  // True when an ingredient list (maybe behind a "Pour la crème :" heading) follows line i.
+  const listFollows = (i: number) => {
+    const [a = "", b = ""] = rawLines.slice(i + 1, i + 3);
+    const isItem = (l: string) => QUANTITY_START.test(stripDecor(l)) && !STEP_NUMBER.test(l);
+    return isItem(a) || (isGroupHeading(stripDecor(a)) && isItem(b));
+  };
+
+  for (const [index, original] of rawLines.entries()) {
     const line = stripDecor(original);
     if (!line) continue;
     const head = headerText(original);
@@ -137,7 +180,7 @@ export function heuristicDraft(input: string): DraftRecipe {
         title = cleanTitle(line);
         continue;
       }
-      if (!sawHeaders && QUANTITY_START.test(line) && !STEP_NUMBER.test(original)) {
+      if (!sawHeaders && ((QUANTITY_START.test(line) && !STEP_NUMBER.test(original)) || (isGroupHeading(line) && listFollows(index - 1)))) {
         section = "ingredients";
       } else {
         intro.push(line);
@@ -147,14 +190,18 @@ export function heuristicDraft(input: string): DraftRecipe {
 
     if (section === "ingredients") {
       // "Pour la pâte :" / "For the icing:" starts a new group.
-      if (/[:：]$/.test(line) && !QUANTITY_START.test(line) && line.length < 50) {
+      if (isGroupHeading(line)) {
         const name = line.replace(/[:：]$/, "").trim();
         if (groups[groups.length - 1].items.length === 0) groups[groups.length - 1].name = name;
         else groups.push({ name, items: [] });
         continue;
       }
-      if (!sawHeaders && (STEP_NUMBER.test(original) || (line.length > 70 && !QUANTITY_START.test(line)))) {
+      if (!sawHeaders && (STEP_NUMBER.test(original) || (line.length > 70 && !QUANTITY_START.test(line))) && !listFollows(index)) {
         section = "steps";
+      } else if (isProse(line) || line.length > 70) {
+        // Method written between ingredient lists: keep it as a step, stay in the ingredients.
+        stepTexts.push(line.replace(STEP_NUMBER, "").trim());
+        continue;
       } else {
         addIngredient(original);
         continue;

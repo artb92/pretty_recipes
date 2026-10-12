@@ -54,6 +54,11 @@ export function captionFromOgDescription(html: string): { caption: string; autho
   return text ? { caption: text, author: null } : null;
 }
 
+const UNIT_WORDS = String.raw`(?:cups?|c\.|tablespoons?|tbsps?|teaspoons?|tsps?|g|kg|ml|cl|l|oz|ounces?|lbs?|pounds?|cloves?|pinch(?:es)?|cans?|sachets?|pinc[ée]es?|cuill[eè]res?|c\. à (?:soupe|café))`;
+const QTY = String.raw`(?:\d+(?:[.,/]\d+)?|[½¼¾⅓⅔])\s*${UNIT_WORDS}(?=\s|$)`;
+const QTY_UNIT = new RegExp(QTY, "gi");
+const QTY_UNIT_SPLIT = new RegExp(String.raw`\s+(?=${QTY})`, "gi");
+
 const STEP_HEADING = String.raw`(?:instructions?|directions?|method|m[ée]thode|steps?|[ée]tapes?|pr[ée]paration)`;
 
 /**
@@ -61,17 +66,25 @@ const STEP_HEADING = String.raw`(?:instructions?|directions?|method|m[ée]thode|
  * the method back on their own lines so the reader sees the shape the creator wrote.
  */
 export function unflattenCaption(caption: string): string {
-  if (caption.split("\n").length > 3) return caption;
+  const lines = caption.split("\n");
+  if (lines.length > 3 && !lines.some((l) => l.length > 250)) return caption;
   let text = caption
     .replace(/\s*[\p{Extended_Pictographic}]+[️‍]*\s*/gu, "\n")
     .replace(/\s+[-•]\s+(?=\S)/g, "\n- ")
-    .replace(new RegExp(String.raw`\s*\b(ingr[ée]dients?|${STEP_HEADING})\s*:\s*`, "gi"), "\n$1:\n")
+    // "… (400°F). 2. Toss the potatoes" -> numbered steps on their own lines
+    .replace(/\s+(\d{1,2})[.)]\s+(?=[A-ZÀ-Ý])/g, "\n$1. ")
+    .replace(new RegExp(String.raw`\s*\b(ingr[ée]dients?|${STEP_HEADING})\s*(?::\s*|\n)`, "gi"), "\n$1:\n")
     // "… @brand Chocolate Fudge Frosting:\n- 1 cup" -> a group heading on its own line
     .replace(/\s+((?:[A-ZÀ-Ý][\p{L}’'-]*\s?){1,4}):\n- /gu, "\n$1:\n- ");
+  // "2 cups ground beef 3 cups potatoes 1 cup cheese": one ingredient per line.
+  text = text
+    .split("\n")
+    .map((l) => ((l.match(QTY_UNIT) ?? []).length >= 3 ? l.replace(QTY_UNIT_SPLIT, "\n") : l))
+    .join("\n");
   const steps = text.match(new RegExp(String.raw`\n${STEP_HEADING}:\n`, "i"));
   if (steps?.index !== undefined) {
     const cut = steps.index + steps[0].length;
-    text = text.slice(0, cut) + text.slice(cut).replace(/([.!?])\s+(?=[A-ZÀ-Ý])/g, "$1\n");
+    text = text.slice(0, cut) + text.slice(cut).replace(/(?<!(?:^|\n)\d{1,2})([.!?])\s+(?=[A-ZÀ-Ý])/g, "$1\n");
   }
   return text.replace(/[ \t]+/g, " ").replace(/\n /g, "\n").replace(/\n{2,}/g, "\n").trim();
 }

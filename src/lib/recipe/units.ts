@@ -137,7 +137,10 @@ export function parseIngredientLine(rawLine: string): ParsedLine {
     .replace(/^\s*(?:[-*•·▪◦‣–—]|\d+[.)]\s|[\p{Extended_Pictographic}️‍]+)\s*/u, "")
     .trim()
     // ".75 ounce" -> "0.75 ounce"
-    .replace(/^\.(\d)/, "0.$1");
+    .replace(/^\.(\d)/, "0.$1")
+    // Brand tags from social captions: "flour @Bob’s Red Mill", "@lalecherausa condensed milk"
+    .replace(/\s*@[\w.’'-]+(?:\s+[A-Z][\w’'-]*)*/g, "")
+    .trim();
   let quantity: number | null = null;
   let quantityMax: number | null = null;
   let unit: UnitCode | null = null;

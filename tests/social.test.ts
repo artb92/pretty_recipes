@@ -25,6 +25,35 @@ describe("unflattenCaption", () => {
     expect(draft.ingredientGroups.map((g) => g.name)).toContain("Glaze");
     expect(draft.steps).toHaveLength(4);
   });
+
+  it("splits inline ingredients, colon-less headings and inline numbered steps", async () => {
+    const { unflattenCaption } = await import("@/lib/social/parse");
+    const { heuristicDraft } = await import("@/lib/recipe/heuristic");
+    const caption =
+      "Cheesy beef bake 🧀 Ingredients 1 lb ground beef 3 cups diced potatoes 2 cups shredded cheddar 1 cup sour cream Directions 1. Brown the beef in a skillet. 2. Layer the potatoes and beef in a dish. 3. Top with cheddar and bake for 40 minutes.";
+    const draft = heuristicDraft(unflattenCaption(caption));
+    expect(draft.ingredientGroups.flatMap((g) => g.items)).toHaveLength(4);
+    expect(draft.steps).toHaveLength(3);
+  });
+
+  it("moves French prose glued after ingredients into the steps", async () => {
+    const { heuristicDraft } = await import("@/lib/recipe/heuristic");
+    const text = [
+      "Fraisier maison",
+      "Génoise :",
+      "- 4 oeufs",
+      "- 120g de sucre",
+      "- un sachet de levure Fouettez les oeufs avec le sucre jusqu'à ce que le mélange blanchisse bien.",
+      "- 40g de beurre Crème mousseline :",
+      "- 250g de lait",
+      "- 60g de sucre",
+    ].join("\n");
+    const draft = heuristicDraft(text);
+    const items = draft.ingredientGroups.flatMap((g) => g.items);
+    expect(items).toHaveLength(6);
+    expect(draft.ingredientGroups.map((g) => g.name)).toContain("Crème mousseline");
+    expect(draft.steps.length).toBeGreaterThan(0);
+  });
 });
 
 describe("captionFromTikTokPage", () => {
