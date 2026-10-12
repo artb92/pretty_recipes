@@ -40,6 +40,18 @@ function clean(v: Json | undefined): string | null {
   return text || null;
 }
 
+/**
+ * WP Recipe Maker writes notes as "1 onion (, peeled and quartered)" and
+ * "1 apple ((your favorite kind), quartered)"; make them read like a normal line.
+ */
+export function tidyNotes(line: string): string {
+  return line
+    .replace(/\s*\(\s*,\s*([^()]*)\)\s*$/, ", $1")
+    .replace(/\(\(([^()]*)\),\s*([^()]*)\)\s*$/, "($1), $2")
+    .replace(/\(\s*,\s*/g, "(")
+    .trim();
+}
+
 function nameOf(v: Json | undefined): string | null {
   for (const item of asArray(v)) {
     const s = isObj(item) ? clean(item.name) : clean(item);
@@ -144,7 +156,8 @@ export function recipeFromJsonLd(html: string): PageRecipe | null {
     if (!r) continue;
     const ingredients = asArray(r.recipeIngredient ?? r.ingredients)
       .map(clean)
-      .filter((s): s is string => Boolean(s));
+      .filter((s): s is string => Boolean(s))
+      .map(tidyNotes);
     const sections = instructionSections(r.recipeInstructions);
     if (!ingredients.length && !sections.length) continue;
     const keywords = typeof r.keywords === "string" ? r.keywords.split(",") : asArray(r.keywords).map((k) => clean(k) ?? "");
@@ -183,20 +196,26 @@ export function pageRecipeToText(r: PageRecipe, lang: "fr" | "en"): string {
 
 /** Readable text of a page without structured data: the article or main element, without chrome. */
 export function readableText(html: string): string {
-  const body =
-    html.match(/<article\b[^>]*>([\s\S]*)<\/article>/i)?.[1] ??
-    html.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1] ??
-    html.match(/<body\b[^>]*>([\s\S]*)<\/body>/i)?.[1] ??
-    html;
-  const stripped = body
-    .replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|template)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<\/(h[1-6]|tr)>/gi, "\n");
-  return htmlToText(stripped)
-    .split("\n")
-    .map((l) => l.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n");
+  const toText = (fragment: string) =>
+    htmlToText(
+      fragment
+        .replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|template)\b[\s\S]*?<\/\1>/gi, " ")
+        .replace(/<!--[\s\S]*?-->/g, " ")
+        .replace(/<\/(h[1-6]|tr)>/gi, "\n"),
+    )
+      .split("\n")
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n");
+  const candidates = [
+    html.match(/<article\b[^>]*>([\s\S]*)<\/article>/i)?.[1],
+    html.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1],
+    html.match(/<body\b[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html,
+  ]
+    .filter((c): c is string => Boolean(c))
+    .map(toText);
+  // Some themes keep only the intro in <article>; take the narrowest block that holds the ingredients.
+  return candidates.find((t) => /ingr[ée]dients?/i.test(t)) ?? candidates[0];
 }
 
 export function pageTitle(html: string): string | null {

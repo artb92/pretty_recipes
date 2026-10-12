@@ -17,6 +17,8 @@ on:
 jobs:
   links:
     runs-on: ubuntu-latest
+    # Informational: a site blocking GitHub's servers must not turn the pull request red.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -53,3 +53,56 @@ export function captionFromOgDescription(html: string): { caption: string; autho
   if (m) return { caption: m[2].trim(), author: `@${m[1]}` };
   return text ? { caption: text, author: null } : null;
 }
+
+const STEP_HEADING = String.raw`(?:instructions?|directions?|method|m[ée]thode|steps?|[ée]tapes?|pr[ée]paration)`;
+
+/**
+ * TikTok's oEmbed returns the caption on one line. Put list items, headings and sentences of
+ * the method back on their own lines so the reader sees the shape the creator wrote.
+ */
+export function unflattenCaption(caption: string): string {
+  if (caption.split("\n").length > 3) return caption;
+  let text = caption
+    .replace(/\s*[\p{Extended_Pictographic}]+[️‍]*\s*/gu, "\n")
+    .replace(/\s+[-•]\s+(?=\S)/g, "\n- ")
+    .replace(new RegExp(String.raw`\s*\b(ingr[ée]dients?|${STEP_HEADING})\s*:\s*`, "gi"), "\n$1:\n")
+    // "… @brand Chocolate Fudge Frosting:\n- 1 cup" -> a group heading on its own line
+    .replace(/\s+((?:[A-ZÀ-Ý][\p{L}’'-]*\s?){1,4}):\n- /gu, "\n$1:\n- ");
+  const steps = text.match(new RegExp(String.raw`\n${STEP_HEADING}:\n`, "i"));
+  if (steps?.index !== undefined) {
+    const cut = steps.index + steps[0].length;
+    text = text.slice(0, cut) + text.slice(cut).replace(/([.!?])\s+(?=[A-ZÀ-Ý])/g, "$1\n");
+  }
+  return text.replace(/[ \t]+/g, " ").replace(/\n /g, "\n").replace(/\n{2,}/g, "\n").trim();
+}
+
+/** TikTok post pages: the description sits in the rehydration JSON as "desc", else in og:description. */
+export function captionFromTikTokPage(html: string): string | null {
+  const desc = html.match(/"desc":"((?:[^"\\]|\\.)*)"/)?.[1];
+  if (desc) {
+    try {
+      const text = (JSON.parse(`"${desc}"`) as string).trim();
+      if (text) return text;
+    } catch {
+      // malformed escape: try the meta tag
+    }
+  }
+  const og = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i)?.[1];
+  return og ? decodeEntities(og).trim() || null : null;
+}
+
+/** Instagram pages sometimes carry the caption only in embedded JSON (edge_media_to_caption). */
+export function captionFromInstagramJson(html: string): { caption: string; author: string | null } | null {
+  // The JSON is often itself inside a JSON string, so quotes arrive escaped once more.
+  const body = html.includes('\\"edge_media_to_caption') ? html.replace(/\\"/g, '"').replace(/\\\\/g, "\\") : html;
+  const text = body.match(/"edge_media_to_caption":\{"edges":\[\{"node":\{(?:"[^"]*":"[^"]*",)*"text":"((?:[^"\\]|\\.)*)"/)?.[1];
+  if (!text) return null;
+  let caption: string;
+  try {
+    caption = (JSON.parse(`"${text}"`) as string).trim();
+  } catch {
+    return null;
+  }
+  const user = body.match(/"owner":\{[^}]*?"username":"([\w.]+)"/)?.[1];
+  return caption ? { caption, author: user ? `@${user}` : null } : null;
+}

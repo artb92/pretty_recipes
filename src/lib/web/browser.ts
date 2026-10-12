@@ -13,7 +13,10 @@ const SKIPPED = new Set(["image", "media", "font", "stylesheet"]);
  * redirecting to a private address is not caught; fine for a self-hosted app, needs a DNS-level
  * guard before exposing the app publicly.
  */
-export async function browserPage(url: URL): Promise<{ url: URL; status: number; body: string }> {
+export async function browserPage(
+  url: URL,
+  waitFor = 'script[type="application/ld+json"]',
+): Promise<{ url: URL; status: number; body: string }> {
   const browser = await getBrowser();
   const context = await browser.newContext({ userAgent: CHROME_UA, locale: "fr-FR", viewport: { width: 1280, height: 900 } });
   try {
@@ -28,9 +31,9 @@ export async function browserPage(url: URL): Promise<{ url: URL; status: number;
       return route.continue();
     });
     const res = await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
-    // A bot check serves an interstitial first, then reloads the real page; wait for the recipe data.
+    // A bot check serves an interstitial first, then reloads the real page; wait for the content.
     const passed = await page
-      .waitForSelector('script[type="application/ld+json"]', { state: "attached", timeout: 15_000 })
+      .waitForSelector(waitFor, { state: "attached", timeout: 15_000 })
       .then(() => true)
       .catch(() => false);
     const final = new URL(page.url());

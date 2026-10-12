@@ -135,7 +135,9 @@ export type ParsedLine = {
 export function parseIngredientLine(rawLine: string): ParsedLine {
   let line = rawLine
     .replace(/^\s*(?:[-*•·▪◦‣–—]|\d+[.)]\s|[\p{Extended_Pictographic}️‍]+)\s*/u, "")
-    .trim();
+    .trim()
+    // ".75 ounce" -> "0.75 ounce"
+    .replace(/^\.(\d)/, "0.$1");
   let quantity: number | null = null;
   let quantityMax: number | null = null;
   let unit: UnitCode | null = null;
